@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simples Video Chat App</title>
+  </head>
+  <body>
+    <h1>Simple Video Chat App</h1>
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script>
+      const socket = io();
+
+      const roomID = "videoRoom";
+      const localVideo = document.getElementById("localVideo");
+      const remoteVideo = document.getElementById("remoteVideo");
+      let peerConnection;
+
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+          localVideo.srcObject = stream;
+
+          socket.emit("join-room", roomID);
+
+          socket.on("user-connected", (userId) => {
+            // Handle user connection
+            // Create an offer and establish a WebRTC connection
+            handleUserConnected(userId);
+          });
+
+          socket.on("user-disconnected", (userId) => {
+            // Handle user disconnection
+            // Remove the corresponding remote video element
+            handleUserDisconnected(userId);
+          });
+
+          socket.on("offer", (offer, senderId) => {
+            // Handle incoming offer
+            handleOffer(offer, senderId);
+          });
+
+          socket.on("answer", (answer, senderId) => {
+            // Handle incoming answer
+            handleAnswer(answer, senderId);
+          });
+
+          socket.on("ice-candidate", (candidate, senderId) => {
+            // Handle incoming ICE candidate
+            handleIceCandidate(candidate, senderId);
+          });
+        })
+        .catch((error) =>
+          console.error("Error accessing media devices:", error)
+        );
+
+      function handleUserConnected(userId) {
+        // Create a new RTCPeerConnection
+        peerConnection = new RTCPeerConnection();
+
+        // Add local stream to the peer connection
+        const localStream = localVideo.srcObject;
+        localStream.getTracks().forEach((track) => {
+          peerConnection.addTrack(track, localStream);
+        });
+
+        // Create and send offer to the remote user
+        peerConnection
+          .createOffer()
+          .then((offer) => {
+            return peerConnection.setLocalDescription(offer);
+          })
+          .then(() => {
+            socket.emit(
+              "offer",
+              peerConnection.localDescription,
+              userId,
+              roomID
+            );
+          });
+
+        // Set up event handlers for the peer connection
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit("ice-candidate", event.candidate, userId, roomID);
+          }
+        };
+
+        peerConnection.ontrack = (event) => {
+          // Add the remote stream to the remote video element
+          remoteVideo.srcObject = event.streams[0];
+        };
+      }
+
+      function handleUserDisconnected(userId) {
+        // Remove the remote video element
+        remoteVideo.srcObject = null;
+
+        // Close the peer connection
+        if (peerConnection) {
+          peerConnection.close();
+        }
+      }
+
+      function handleOffer(offer, senderId) {
+        // Handle incoming offer
+        peerConnection = new RTCPeerConnection();
+
+        // Add local stream to the peer connection
+        const localStream = localVideo.srcObject;
+        localStream.getTracks().forEach((track) => {
+          peerConnection.addTrack(track, localStream);
+        });
+
+        // Set remote description
+        peerConnection
+          .setRemoteDescription(new RTCSessionDescription(offer))
+          .then(() => {
+            // Create and send answer to the remote user
+            return peerConnection.createAnswer();
+          })
+          .then((answer) => {
+            return peerConnection.setLocalDescription(answer);
+          })
+          .then(() => {
+            socket.emit(
+              "answer",
+              peerConnection.localDescription,
+              senderId,
+              roomID
+            );
+          });
+
+        // Set up event handlers for the peer connection
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit("ice-candidate", event.candidate, senderId, roomID);
+          }
+        };
+
+        peerConnection.ontrack = (event) => {
+          // Add the remote stream to the remote video element
+          remoteVideo.srcObject = event.streams[0];
+        };
+      }
+
+      function handleAnswer(answer, senderId) {
+        // Handle incoming answer
+        peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      }
+
+      function handleIceCandidate(candidate, senderId) {
+        // Handle incoming ICE candidate
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    </script>
+  </body>
+</html>
